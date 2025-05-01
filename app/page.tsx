@@ -24,9 +24,14 @@ export default function HomePage() {
 
   return (
     <div className="container mx-auto py-6 px-4">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">辩论计时器</h1>
-        {!isDebateStarted && <Button onClick={() => setIsSettingsOpen(true)}>设置</Button>}
+      <div className="mb-8">
+        <div className="flex justify-between items-center mb-2">
+          <h1 className="text-2xl font-bold">辩论计时器</h1>
+          {!isDebateStarted && <Button onClick={() => setIsSettingsOpen(true)}>设置</Button>}
+        </div>
+        <div className="text-sm text-gray-500">
+          作者: @你好塞尔达 | 基于 Next.js + React 
+        </div>
       </div>
 
       {!isDebateStarted ? (
