@@ -6,10 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { DebateTimer } from "@/components/debate-timer"
 import { SettingsDialog } from "@/components/settings-dialog"
+import { RecordingPermission } from "@/components/recording-permission"
 
 export default function HomePage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isDebateStarted, setIsDebateStarted] = useState(false)
+  const [micPermissionGranted, setMicPermissionGranted] = useState(false)
   const [debateSettings, setDebateSettings] = useState({
     affirmative: "正方",
     negative: "反方",
@@ -29,9 +31,7 @@ export default function HomePage() {
           <h1 className="text-2xl font-bold">辩论计时器</h1>
           {!isDebateStarted && <Button onClick={() => setIsSettingsOpen(true)}>设置</Button>}
         </div>
-        <div className="text-sm text-gray-500">
-          作者: @你好塞尔达 | 基于 Next.js + React 
-        </div>
+        <div className="text-sm text-gray-500">作者: @你好塞尔达 | 基于 Next.js + React</div>
       </div>
 
       {!isDebateStarted ? (
@@ -59,6 +59,12 @@ export default function HomePage() {
             <div className="space-y-2">
               <Label>总结陈词时间</Label>
               <div className="font-medium">{Math.floor(debateSettings.closingTime / 60)}分钟</div>
+            </div>
+            <div className="space-y-2">
+              <Label>麦克风权限</Label>
+              <div className="flex items-center">
+                <RecordingPermission onPermissionChange={setMicPermissionGranted} />
+              </div>
             </div>
             <Button className="w-full" onClick={handleStartDebate}>
               开始辩论

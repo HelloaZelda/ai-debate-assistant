@@ -16,6 +16,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Play, Pause, SkipForward, X } from "lucide-react"
+import { RecordingPermission } from "./recording-permission"
+import { AudioRecorder } from "./audio-recorder"
+import { TranscriptionDisplay } from "./transcription-display"
 
 // 辩论阶段定义
 type DebatePhase = {
@@ -59,6 +62,19 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
   const [affirmativeTimeRemaining, setAffirmativeTimeRemaining] = useState(settings.freeDebateTime)
   const [negativeTimeRemaining, setNegativeTimeRemaining] = useState(settings.freeDebateTime)
 
+  // QA section special handling
+  const [qaAffirmativeTimeRemaining, setQaAffirmativeTimeRemaining] = useState(40) // 40 seconds for QA
+  const [qaNegativeTimeRemaining, setQaNegativeTimeRemaining] = useState(40) // 40 seconds for QA
+  const [qaActiveSpeaker, setQaActiveSpeaker] = useState<"affirmative" | "negative" | null>(null)
+  const [affirmativeAnswerCount, setAffirmativeAnswerCount] = useState(0)
+  const [negativeAnswerCount, setNegativeAnswerCount] = useState(0)
+  const [micPermissionGranted, setMicPermissionGranted] = useState(false)
+
+  // Transcription state
+  const [isTranscribing, setIsTranscribing] = useState(false)
+  const [affirmativeTranscription, setAffirmativeTranscription] = useState("")
+  const [negativeTranscription, setNegativeTranscription] = useState("")
+
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const currentPhase = phases[currentPhaseIndex]
 
@@ -87,8 +103,31 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
               return prev - 1
             })
           }
-        } else if (currentPhase.speaker !== "qa") {
-          // 普通计时模式
+        } else if (currentPhase.speaker === "qa") {
+          // QA mode
+          if (qaActiveSpeaker === "affirmative") {
+            setQaAffirmativeTimeRemaining((prev) => {
+              if (prev <= 1) {
+                setQaActiveSpeaker(null)
+                setIsPaused(true)
+                clearInterval(timerRef.current!)
+                return 40 // Reset to 40 seconds
+              }
+              return prev - 1
+            })
+          } else if (qaActiveSpeaker === "negative") {
+            setQaNegativeTimeRemaining((prev) => {
+              if (prev <= 1) {
+                setQaActiveSpeaker(null)
+                setIsPaused(true)
+                clearInterval(timerRef.current!)
+                return 40 // Reset to 40 seconds
+              }
+              return prev - 1
+            })
+          }
+        } else {
+          // Normal timing mode
           setTimeRemaining((prev) => {
             if (prev <= 1) {
               setIsPaused(true)
@@ -106,7 +145,7 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [isPaused, currentPhase.speaker, activeSpeaker])
+  }, [isPaused, currentPhase.speaker, activeSpeaker, qaActiveSpeaker])
 
   // 更新进度条
   useEffect(() => {
@@ -116,6 +155,14 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
       } else if (activeSpeaker === "negative") {
         setProgress((negativeTimeRemaining / settings.freeDebateTime) * 100)
       }
+    } else if (currentPhase.speaker === "qa") {
+      if (qaActiveSpeaker === "affirmative") {
+        setProgress((qaAffirmativeTimeRemaining / 40) * 100)
+      } else if (qaActiveSpeaker === "negative") {
+        setProgress((qaNegativeTimeRemaining / 40) * 100)
+      } else {
+        setProgress(100)
+      }
     } else if (currentPhase.speaker !== "qa" && currentPhase.duration > 0) {
       setProgress((timeRemaining / currentPhase.duration) * 100)
     }
@@ -123,7 +170,10 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
     timeRemaining,
     affirmativeTimeRemaining,
     negativeTimeRemaining,
+    qaAffirmativeTimeRemaining,
+    qaNegativeTimeRemaining,
     activeSpeaker,
+    qaActiveSpeaker,
     currentPhase,
     settings.freeDebateTime,
   ])
@@ -137,6 +187,7 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
       // 重置计时器状态
       setIsPaused(true)
       setActiveSpeaker(null)
+      setQaActiveSpeaker(null)
 
       if (nextPhase.speaker !== "both" && nextPhase.speaker !== "qa") {
         setTimeRemaining(nextPhase.duration)
@@ -150,8 +201,11 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
   // 切换暂停/播放
   const togglePause = () => {
     // 只有在非QA环节且有活跃发言方时才能切换暂停状态
-    if (currentPhase.speaker === "qa") return
-    if (currentPhase.speaker === "both" && !activeSpeaker) return
+    if (currentPhase.speaker === "qa") {
+      if (!qaActiveSpeaker) return
+    } else if (currentPhase.speaker === "both" && !activeSpeaker) {
+      return
+    }
 
     setIsPaused((prev) => !prev)
   }
@@ -164,11 +218,53 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
     setIsPaused(false)
   }
 
+  // Set QA speaker
+  const startQaTimer = (speaker: "affirmative" | "negative") => {
+    if (currentPhase.speaker !== "qa") return
+
+    // If the same speaker is clicked again, toggle off
+    if (qaActiveSpeaker === speaker) {
+      setQaActiveSpeaker(null)
+      setIsPaused(true)
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+      }
+      return
+    }
+
+    // Don't allow starting if the other speaker is already speaking
+    if (qaActiveSpeaker && qaActiveSpeaker !== speaker) return
+
+    setQaActiveSpeaker(speaker)
+    setIsPaused(false)
+
+    // Increment answer count only when starting a new answer
+    if (speaker === "affirmative") {
+      setAffirmativeAnswerCount((prev) => prev + 1)
+    } else {
+      setNegativeAnswerCount((prev) => prev + 1)
+    }
+  }
+
   // 格式化时间为MM:SS
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
     const secs = seconds % 60
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }
+
+  // Handle microphone permission change
+  const handleMicPermissionChange = (granted: boolean) => {
+    setMicPermissionGranted(granted)
+  }
+
+  // Handle transcription updates
+  const handleAffirmativeTranscription = (text: string) => {
+    setAffirmativeTranscription(text)
+  }
+
+  const handleNegativeTranscription = (text: string) => {
+    setNegativeTranscription(text)
   }
 
   return (
@@ -255,10 +351,116 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
               </div>
             </div>
           ) : currentPhase.speaker === "qa" ? (
-            <div className="text-center py-6">
-              <div className="text-2xl font-bold mb-4">提问环节</div>
-              <div className="text-gray-500 mb-6">
-                {currentPhase.id === "qa_aff" ? "正方" : "反方"}接受提问，无时间限制
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <Card
+                  className={`border-2 ${qaActiveSpeaker === "affirmative" ? "border-blue-500" : "border-gray-200"}`}
+                >
+                  <CardHeader className="p-3">
+                    <CardTitle className="text-lg flex justify-between items-center">
+                      <span>{settings.affirmative}</span>
+                      <Badge variant="outline">已回答: {affirmativeAnswerCount}</Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-3 pt-0">
+                    <div
+                      className={`text-4xl font-bold text-center ${
+                        qaActiveSpeaker === "affirmative" && qaAffirmativeTimeRemaining < 10 ? "text-red-500" : ""
+                      }`}
+                    >
+                      {qaActiveSpeaker === "affirmative" ? formatTime(qaAffirmativeTimeRemaining) : "00:40"}
+                    </div>
+                    <Progress
+                      value={qaActiveSpeaker === "affirmative" ? (qaAffirmativeTimeRemaining / 40) * 100 : 100}
+                      className="h-2 mt-2"
+                    />
+                  </CardContent>
+                  <CardFooter className="p-3 pt-0 flex-col gap-2">
+                    <Button
+                      className="w-full"
+                      variant={qaActiveSpeaker === "affirmative" ? "default" : "outline"}
+                      onClick={() => startQaTimer("affirmative")}
+                      disabled={qaActiveSpeaker !== null && qaActiveSpeaker !== "affirmative"}
+                    >
+                      {qaActiveSpeaker === "affirmative" ? "结束回答" : "正方回答"}
+                    </Button>
+
+                    {micPermissionGranted && (
+                      <AudioRecorder
+                        disabled={qaActiveSpeaker !== "affirmative"}
+                        enableTranscription={true}
+                        onTranscriptionUpdate={handleAffirmativeTranscription}
+                      />
+                    )}
+                  </CardFooter>
+
+                  {qaActiveSpeaker === "affirmative" && (
+                    <TranscriptionDisplay
+                      text={affirmativeTranscription}
+                      isTranscribing={isTranscribing && qaActiveSpeaker === "affirmative"}
+                      speaker={settings.affirmative}
+                    />
+                  )}
+                </Card>
+
+                <Card className={`border-2 ${qaActiveSpeaker === "negative" ? "border-blue-500" : "border-gray-200"}`}>
+                  <CardHeader className="p-3">
+                    <CardTitle className="text-lg flex justify-between items-center">
+                      <span>{settings.negative}</span>
+                      <Badge variant="outline">已回答: {negativeAnswerCount}</Badge>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-3 pt-0">
+                    <div
+                      className={`text-4xl font-bold text-center ${
+                        qaActiveSpeaker === "negative" && qaNegativeTimeRemaining < 10 ? "text-red-500" : ""
+                      }`}
+                    >
+                      {qaActiveSpeaker === "negative" ? formatTime(qaNegativeTimeRemaining) : "00:40"}
+                    </div>
+                    <Progress
+                      value={qaActiveSpeaker === "negative" ? (qaNegativeTimeRemaining / 40) * 100 : 100}
+                      className="h-2 mt-2"
+                    />
+                  </CardContent>
+                  <CardFooter className="p-3 pt-0 flex-col gap-2">
+                    <Button
+                      className="w-full"
+                      variant={qaActiveSpeaker === "negative" ? "default" : "outline"}
+                      onClick={() => startQaTimer("negative")}
+                      disabled={qaActiveSpeaker !== null && qaActiveSpeaker !== "negative"}
+                    >
+                      {qaActiveSpeaker === "negative" ? "结束回答" : "反方回答"}
+                    </Button>
+
+                    {micPermissionGranted && (
+                      <AudioRecorder
+                        disabled={qaActiveSpeaker !== "negative"}
+                        enableTranscription={true}
+                        onTranscriptionUpdate={handleNegativeTranscription}
+                      />
+                    )}
+                  </CardFooter>
+
+                  {qaActiveSpeaker === "negative" && (
+                    <TranscriptionDisplay
+                      text={negativeTranscription}
+                      isTranscribing={isTranscribing && qaActiveSpeaker === "negative"}
+                      speaker={settings.negative}
+                    />
+                  )}
+                </Card>
+              </div>
+
+              <div className="flex justify-center space-x-4">
+                <Button variant="outline" onClick={togglePause} disabled={!qaActiveSpeaker}>
+                  {isPaused ? <Play className="h-4 w-4 mr-2" /> : <Pause className="h-4 w-4 mr-2" />}
+                  {isPaused ? "继续" : "暂停"}
+                </Button>
+
+                <div className="flex items-center">
+                  <RecordingPermission onPermissionChange={handleMicPermissionChange} />
+                </div>
               </div>
             </div>
           ) : (
@@ -277,7 +479,10 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
             <Button
               variant="outline"
               onClick={togglePause}
-              disabled={currentPhase.speaker === "qa" || (currentPhase.speaker === "both" && !activeSpeaker)}
+              disabled={
+                (currentPhase.speaker === "qa" && !qaActiveSpeaker) ||
+                (currentPhase.speaker === "both" && !activeSpeaker)
+              }
             >
               {isPaused ? <Play className="h-4 w-4 mr-2" /> : <Pause className="h-4 w-4 mr-2" />}
               {isPaused ? "继续" : "暂停"}
