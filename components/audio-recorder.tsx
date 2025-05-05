@@ -2,28 +2,18 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Mic, MicOff, Loader2 } from "lucide-react"
+import { Mic, MicOff } from "lucide-react"
 import { RecordingPermission } from "@/components/recording-permission"
-import { transcribeLive } from "@/services/transcribe-service"
 
 type AudioRecorderProps = {
   onRecordingComplete?: (blob: Blob) => void
-  onTranscriptionUpdate?: (text: string) => void
   disabled?: boolean
-  enableTranscription?: boolean
 }
 
-export function AudioRecorder({
-  onRecordingComplete,
-  onTranscriptionUpdate,
-  disabled = false,
-  enableTranscription = false,
-}: AudioRecorderProps) {
+export function AudioRecorder({ onRecordingComplete, disabled = false }: AudioRecorderProps) {
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [permissionGranted, setPermissionGranted] = useState(false)
-  const [isTranscribing, setIsTranscribing] = useState(false)
-  const [transcriptionText, setTranscriptionText] = useState("")
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -58,12 +48,6 @@ export function AudioRecorder({
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data)
-
-          // If transcription is enabled, send the audio chunk for live transcription
-          if (enableTranscription && onTranscriptionUpdate) {
-            const audioBlob = new Blob([event.data], { type: "audio/wav" })
-            handleLiveTranscription(audioBlob)
-          }
         }
       }
 
@@ -84,8 +68,7 @@ export function AudioRecorder({
         }
       }
 
-      // Set a smaller timeslice for more frequent ondataavailable events (for live transcription)
-      mediaRecorder.start(enableTranscription ? 1000 : undefined)
+      mediaRecorder.start()
       setIsRecording(true)
 
       // Start timer
@@ -102,34 +85,6 @@ export function AudioRecorder({
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop()
       setIsRecording(false)
-      setIsTranscribing(false)
-    }
-  }
-
-  const handleLiveTranscription = async (audioBlob: Blob) => {
-    if (!isTranscribing) {
-      setIsTranscribing(true)
-    }
-
-    try {
-      await transcribeLive(
-        audioBlob,
-        (text) => {
-          setTranscriptionText((prev) => {
-            const newText = prev ? `${prev} ${text}` : text
-            if (onTranscriptionUpdate) {
-              onTranscriptionUpdate(newText)
-            }
-            return newText
-          })
-        },
-        () => {
-          setIsTranscribing(false)
-        },
-      )
-    } catch (error) {
-      console.error("Transcription error:", error)
-      setIsTranscribing(false)
     }
   }
 
@@ -155,11 +110,7 @@ export function AudioRecorder({
                 onClick={stopRecording}
                 className="bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50"
               >
-                {isTranscribing ? (
-                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                ) : (
-                  <MicOff className="h-4 w-4 mr-1" />
-                )}
+                <MicOff className="h-4 w-4 mr-1" />
                 停止录音
               </Button>
             </>

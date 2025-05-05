@@ -18,7 +18,6 @@ import {
 import { Play, Pause, SkipForward, X } from "lucide-react"
 import { RecordingPermission } from "./recording-permission"
 import { AudioRecorder } from "./audio-recorder"
-import { TranscriptionDisplay } from "./transcription-display"
 
 // 辩论阶段定义
 type DebatePhase = {
@@ -27,6 +26,9 @@ type DebatePhase = {
   duration: number // in seconds
   speaker: "affirmative" | "negative" | "both" | "qa"
 }
+
+// QA角色定义
+type QaRole = "aff2" | "aff3" | "neg2" | "neg3" | null
 
 type DebateTimerProps = {
   settings: {
@@ -45,8 +47,7 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
     { id: "opening_aff", name: "开场陈词 (正方一辩)", duration: settings.openingTime, speaker: "affirmative" },
     { id: "opening_neg", name: "开场陈词 (反方一辩)", duration: settings.openingTime, speaker: "negative" },
     { id: "free_debate", name: "自由辩论", duration: settings.freeDebateTime, speaker: "both" },
-    { id: "qa_aff", name: "正方提问环节", duration: 0, speaker: "qa" },
-    { id: "qa_neg", name: "反方提问环节", duration: 0, speaker: "qa" },
+    { id: "qa", name: "提问环节", duration: 0, speaker: "qa" },
     { id: "closing_aff", name: "总结陈词 (正方四辩)", duration: settings.closingTime, speaker: "affirmative" },
     { id: "closing_neg", name: "总结陈词 (反方四辩)", duration: settings.closingTime, speaker: "negative" },
   ]
@@ -63,17 +64,20 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
   const [negativeTimeRemaining, setNegativeTimeRemaining] = useState(settings.freeDebateTime)
 
   // QA section special handling
-  const [qaAffirmativeTimeRemaining, setQaAffirmativeTimeRemaining] = useState(40) // 40 seconds for QA
-  const [qaNegativeTimeRemaining, setQaNegativeTimeRemaining] = useState(40) // 40 seconds for QA
-  const [qaActiveSpeaker, setQaActiveSpeaker] = useState<"affirmative" | "negative" | null>(null)
-  const [affirmativeAnswerCount, setAffirmativeAnswerCount] = useState(0)
-  const [negativeAnswerCount, setNegativeAnswerCount] = useState(0)
+  const [qaActiveRole, setQaActiveRole] = useState<QaRole>(null)
+  const [qaTimeRemaining, setQaTimeRemaining] = useState({
+    aff2: 40, // 40 seconds for each debater
+    aff3: 40,
+    neg2: 40,
+    neg3: 40,
+  })
+  const [qaAnswerCount, setQaAnswerCount] = useState({
+    aff2: 0,
+    aff3: 0,
+    neg2: 0,
+    neg3: 0,
+  })
   const [micPermissionGranted, setMicPermissionGranted] = useState(false)
-
-  // Transcription state
-  const [isTranscribing, setIsTranscribing] = useState(false)
-  const [affirmativeTranscription, setAffirmativeTranscription] = useState("")
-  const [negativeTranscription, setNegativeTranscription] = useState("")
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const currentPhase = phases[currentPhaseIndex]
@@ -105,25 +109,16 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
           }
         } else if (currentPhase.speaker === "qa") {
           // QA mode
-          if (qaActiveSpeaker === "affirmative") {
-            setQaAffirmativeTimeRemaining((prev) => {
-              if (prev <= 1) {
-                setQaActiveSpeaker(null)
+          if (qaActiveRole) {
+            setQaTimeRemaining((prev) => {
+              const newTime = prev[qaActiveRole] - 1
+              if (newTime <= 0) {
+                setQaActiveRole(null)
                 setIsPaused(true)
                 clearInterval(timerRef.current!)
-                return 40 // Reset to 40 seconds
+                return { ...prev, [qaActiveRole]: 40 } // Reset to 40 seconds
               }
-              return prev - 1
-            })
-          } else if (qaActiveSpeaker === "negative") {
-            setQaNegativeTimeRemaining((prev) => {
-              if (prev <= 1) {
-                setQaActiveSpeaker(null)
-                setIsPaused(true)
-                clearInterval(timerRef.current!)
-                return 40 // Reset to 40 seconds
-              }
-              return prev - 1
+              return { ...prev, [qaActiveRole]: newTime }
             })
           }
         } else {
@@ -145,7 +140,7 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
     }
-  }, [isPaused, currentPhase.speaker, activeSpeaker, qaActiveSpeaker])
+  }, [isPaused, currentPhase.speaker, activeSpeaker, qaActiveRole])
 
   // 更新进度条
   useEffect(() => {
@@ -156,10 +151,8 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
         setProgress((negativeTimeRemaining / settings.freeDebateTime) * 100)
       }
     } else if (currentPhase.speaker === "qa") {
-      if (qaActiveSpeaker === "affirmative") {
-        setProgress((qaAffirmativeTimeRemaining / 40) * 100)
-      } else if (qaActiveSpeaker === "negative") {
-        setProgress((qaNegativeTimeRemaining / 40) * 100)
+      if (qaActiveRole) {
+        setProgress((qaTimeRemaining[qaActiveRole] / 40) * 100)
       } else {
         setProgress(100)
       }
@@ -170,10 +163,9 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
     timeRemaining,
     affirmativeTimeRemaining,
     negativeTimeRemaining,
-    qaAffirmativeTimeRemaining,
-    qaNegativeTimeRemaining,
+    qaTimeRemaining,
     activeSpeaker,
-    qaActiveSpeaker,
+    qaActiveRole,
     currentPhase,
     settings.freeDebateTime,
   ])
@@ -187,7 +179,7 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
       // 重置计时器状态
       setIsPaused(true)
       setActiveSpeaker(null)
-      setQaActiveSpeaker(null)
+      setQaActiveRole(null)
 
       if (nextPhase.speaker !== "both" && nextPhase.speaker !== "qa") {
         setTimeRemaining(nextPhase.duration)
@@ -202,7 +194,7 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
   const togglePause = () => {
     // 只有在非QA环节且有活跃发言方时才能切换暂停状态
     if (currentPhase.speaker === "qa") {
-      if (!qaActiveSpeaker) return
+      if (!qaActiveRole) return
     } else if (currentPhase.speaker === "both" && !activeSpeaker) {
       return
     }
@@ -219,12 +211,12 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
   }
 
   // Set QA speaker
-  const startQaTimer = (speaker: "affirmative" | "negative") => {
-    if (currentPhase.speaker !== "qa") return
+  const startQaTimer = (role: QaRole) => {
+    if (currentPhase.speaker !== "qa" || !role) return
 
-    // If the same speaker is clicked again, toggle off
-    if (qaActiveSpeaker === speaker) {
-      setQaActiveSpeaker(null)
+    // If the same role is clicked again, toggle off
+    if (qaActiveRole === role) {
+      setQaActiveRole(null)
       setIsPaused(true)
       if (timerRef.current) {
         clearInterval(timerRef.current)
@@ -232,18 +224,17 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
       return
     }
 
-    // Don't allow starting if the other speaker is already speaking
-    if (qaActiveSpeaker && qaActiveSpeaker !== speaker) return
+    // Don't allow starting if another role is already speaking
+    if (qaActiveRole && qaActiveRole !== role) return
 
-    setQaActiveSpeaker(speaker)
+    setQaActiveRole(role)
     setIsPaused(false)
 
     // Increment answer count only when starting a new answer
-    if (speaker === "affirmative") {
-      setAffirmativeAnswerCount((prev) => prev + 1)
-    } else {
-      setNegativeAnswerCount((prev) => prev + 1)
-    }
+    setQaAnswerCount((prev) => ({
+      ...prev,
+      [role]: prev[role] + 1,
+    }))
   }
 
   // 格式化时间为MM:SS
@@ -256,15 +247,6 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
   // Handle microphone permission change
   const handleMicPermissionChange = (granted: boolean) => {
     setMicPermissionGranted(granted)
-  }
-
-  // Handle transcription updates
-  const handleAffirmativeTranscription = (text: string) => {
-    setAffirmativeTranscription(text)
-  }
-
-  const handleNegativeTranscription = (text: string) => {
-    setNegativeTranscription(text)
   }
 
   return (
@@ -352,108 +334,160 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
             </div>
           ) : currentPhase.speaker === "qa" ? (
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <Card
-                  className={`border-2 ${qaActiveSpeaker === "affirmative" ? "border-blue-500" : "border-gray-200"}`}
-                >
-                  <CardHeader className="p-3">
-                    <CardTitle className="text-lg flex justify-between items-center">
-                      <span>{settings.affirmative}</span>
-                      <Badge variant="outline">已回答: {affirmativeAnswerCount}</Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-3 pt-0">
-                    <div
-                      className={`text-4xl font-bold text-center ${
-                        qaActiveSpeaker === "affirmative" && qaAffirmativeTimeRemaining < 10 ? "text-red-500" : ""
-                      }`}
-                    >
-                      {qaActiveSpeaker === "affirmative" ? formatTime(qaAffirmativeTimeRemaining) : "00:40"}
-                    </div>
-                    <Progress
-                      value={qaActiveSpeaker === "affirmative" ? (qaAffirmativeTimeRemaining / 40) * 100 : 100}
-                      className="h-2 mt-2"
-                    />
-                  </CardContent>
-                  <CardFooter className="p-3 pt-0 flex-col gap-2">
-                    <Button
-                      className="w-full"
-                      variant={qaActiveSpeaker === "affirmative" ? "default" : "outline"}
-                      onClick={() => startQaTimer("affirmative")}
-                      disabled={qaActiveSpeaker !== null && qaActiveSpeaker !== "affirmative"}
-                    >
-                      {qaActiveSpeaker === "affirmative" ? "结束回答" : "正方回答"}
-                    </Button>
-
-                    {micPermissionGranted && (
-                      <AudioRecorder
-                        disabled={qaActiveSpeaker !== "affirmative"}
-                        enableTranscription={true}
-                        onTranscriptionUpdate={handleAffirmativeTranscription}
+              {/* 正方二三辩 */}
+              <div className="space-y-2">
+                <h3 className="font-medium">{settings.affirmative}</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* 正方二辩 */}
+                  <Card className={`border-2 ${qaActiveRole === "aff2" ? "border-blue-500" : "border-gray-200"}`}>
+                    <CardHeader className="p-3">
+                      <CardTitle className="text-lg flex justify-between items-center">
+                        <span>二辩</span>
+                        <Badge variant="outline">已回答: {qaAnswerCount.aff2}</Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <div
+                        className={`text-4xl font-bold text-center ${
+                          qaActiveRole === "aff2" && qaTimeRemaining.aff2 < 10 ? "text-red-500" : ""
+                        }`}
+                      >
+                        {qaActiveRole === "aff2" ? formatTime(qaTimeRemaining.aff2) : "00:40"}
+                      </div>
+                      <Progress
+                        value={qaActiveRole === "aff2" ? (qaTimeRemaining.aff2 / 40) * 100 : 100}
+                        className="h-2 mt-2"
                       />
-                    )}
-                  </CardFooter>
+                    </CardContent>
+                    <CardFooter className="p-3 pt-0 flex-col gap-2">
+                      <Button
+                        className="w-full"
+                        variant={qaActiveRole === "aff2" ? "default" : "outline"}
+                        onClick={() => startQaTimer("aff2")}
+                        disabled={qaActiveRole !== null && qaActiveRole !== "aff2"}
+                      >
+                        {qaActiveRole === "aff2" ? "结束回答" : "开始回答"}
+                      </Button>
 
-                  {qaActiveSpeaker === "affirmative" && (
-                    <TranscriptionDisplay
-                      text={affirmativeTranscription}
-                      isTranscribing={isTranscribing && qaActiveSpeaker === "affirmative"}
-                      speaker={settings.affirmative}
-                    />
-                  )}
-                </Card>
+                      {micPermissionGranted && <AudioRecorder disabled={qaActiveRole !== "aff2"} />}
+                    </CardFooter>
+                  </Card>
 
-                <Card className={`border-2 ${qaActiveSpeaker === "negative" ? "border-blue-500" : "border-gray-200"}`}>
-                  <CardHeader className="p-3">
-                    <CardTitle className="text-lg flex justify-between items-center">
-                      <span>{settings.negative}</span>
-                      <Badge variant="outline">已回答: {negativeAnswerCount}</Badge>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-3 pt-0">
-                    <div
-                      className={`text-4xl font-bold text-center ${
-                        qaActiveSpeaker === "negative" && qaNegativeTimeRemaining < 10 ? "text-red-500" : ""
-                      }`}
-                    >
-                      {qaActiveSpeaker === "negative" ? formatTime(qaNegativeTimeRemaining) : "00:40"}
-                    </div>
-                    <Progress
-                      value={qaActiveSpeaker === "negative" ? (qaNegativeTimeRemaining / 40) * 100 : 100}
-                      className="h-2 mt-2"
-                    />
-                  </CardContent>
-                  <CardFooter className="p-3 pt-0 flex-col gap-2">
-                    <Button
-                      className="w-full"
-                      variant={qaActiveSpeaker === "negative" ? "default" : "outline"}
-                      onClick={() => startQaTimer("negative")}
-                      disabled={qaActiveSpeaker !== null && qaActiveSpeaker !== "negative"}
-                    >
-                      {qaActiveSpeaker === "negative" ? "结束回答" : "反方回答"}
-                    </Button>
-
-                    {micPermissionGranted && (
-                      <AudioRecorder
-                        disabled={qaActiveSpeaker !== "negative"}
-                        enableTranscription={true}
-                        onTranscriptionUpdate={handleNegativeTranscription}
+                  {/* 正方三辩 */}
+                  <Card className={`border-2 ${qaActiveRole === "aff3" ? "border-blue-500" : "border-gray-200"}`}>
+                    <CardHeader className="p-3">
+                      <CardTitle className="text-lg flex justify-between items-center">
+                        <span>三辩</span>
+                        <Badge variant="outline">已回答: {qaAnswerCount.aff3}</Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <div
+                        className={`text-4xl font-bold text-center ${
+                          qaActiveRole === "aff3" && qaTimeRemaining.aff3 < 10 ? "text-red-500" : ""
+                        }`}
+                      >
+                        {qaActiveRole === "aff3" ? formatTime(qaTimeRemaining.aff3) : "00:40"}
+                      </div>
+                      <Progress
+                        value={qaActiveRole === "aff3" ? (qaTimeRemaining.aff3 / 40) * 100 : 100}
+                        className="h-2 mt-2"
                       />
-                    )}
-                  </CardFooter>
+                    </CardContent>
+                    <CardFooter className="p-3 pt-0 flex-col gap-2">
+                      <Button
+                        className="w-full"
+                        variant={qaActiveRole === "aff3" ? "default" : "outline"}
+                        onClick={() => startQaTimer("aff3")}
+                        disabled={qaActiveRole !== null && qaActiveRole !== "aff3"}
+                      >
+                        {qaActiveRole === "aff3" ? "结束回答" : "开始回答"}
+                      </Button>
 
-                  {qaActiveSpeaker === "negative" && (
-                    <TranscriptionDisplay
-                      text={negativeTranscription}
-                      isTranscribing={isTranscribing && qaActiveSpeaker === "negative"}
-                      speaker={settings.negative}
-                    />
-                  )}
-                </Card>
+                      {micPermissionGranted && <AudioRecorder disabled={qaActiveRole !== "aff3"} />}
+                    </CardFooter>
+                  </Card>
+                </div>
+              </div>
+
+              {/* 反方二三辩 */}
+              <div className="space-y-2">
+                <h3 className="font-medium">{settings.negative}</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* 反方二辩 */}
+                  <Card className={`border-2 ${qaActiveRole === "neg2" ? "border-blue-500" : "border-gray-200"}`}>
+                    <CardHeader className="p-3">
+                      <CardTitle className="text-lg flex justify-between items-center">
+                        <span>二辩</span>
+                        <Badge variant="outline">已回答: {qaAnswerCount.neg2}</Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <div
+                        className={`text-4xl font-bold text-center ${
+                          qaActiveRole === "neg2" && qaTimeRemaining.neg2 < 10 ? "text-red-500" : ""
+                        }`}
+                      >
+                        {qaActiveRole === "neg2" ? formatTime(qaTimeRemaining.neg2) : "00:40"}
+                      </div>
+                      <Progress
+                        value={qaActiveRole === "neg2" ? (qaTimeRemaining.neg2 / 40) * 100 : 100}
+                        className="h-2 mt-2"
+                      />
+                    </CardContent>
+                    <CardFooter className="p-3 pt-0 flex-col gap-2">
+                      <Button
+                        className="w-full"
+                        variant={qaActiveRole === "neg2" ? "default" : "outline"}
+                        onClick={() => startQaTimer("neg2")}
+                        disabled={qaActiveRole !== null && qaActiveRole !== "neg2"}
+                      >
+                        {qaActiveRole === "neg2" ? "结束回答" : "开始回答"}
+                      </Button>
+
+                      {micPermissionGranted && <AudioRecorder disabled={qaActiveRole !== "neg2"} />}
+                    </CardFooter>
+                  </Card>
+
+                  {/* 反方三辩 */}
+                  <Card className={`border-2 ${qaActiveRole === "neg3" ? "border-blue-500" : "border-gray-200"}`}>
+                    <CardHeader className="p-3">
+                      <CardTitle className="text-lg flex justify-between items-center">
+                        <span>三辩</span>
+                        <Badge variant="outline">已回答: {qaAnswerCount.neg3}</Badge>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-0">
+                      <div
+                        className={`text-4xl font-bold text-center ${
+                          qaActiveRole === "neg3" && qaTimeRemaining.neg3 < 10 ? "text-red-500" : ""
+                        }`}
+                      >
+                        {qaActiveRole === "neg3" ? formatTime(qaTimeRemaining.neg3) : "00:40"}
+                      </div>
+                      <Progress
+                        value={qaActiveRole === "neg3" ? (qaTimeRemaining.neg3 / 40) * 100 : 100}
+                        className="h-2 mt-2"
+                      />
+                    </CardContent>
+                    <CardFooter className="p-3 pt-0 flex-col gap-2">
+                      <Button
+                        className="w-full"
+                        variant={qaActiveRole === "neg3" ? "default" : "outline"}
+                        onClick={() => startQaTimer("neg3")}
+                        disabled={qaActiveRole !== null && qaActiveRole !== "neg3"}
+                      >
+                        {qaActiveRole === "neg3" ? "结束回答" : "开始回答"}
+                      </Button>
+
+                      {micPermissionGranted && <AudioRecorder disabled={qaActiveRole !== "neg3"} />}
+                    </CardFooter>
+                  </Card>
+                </div>
               </div>
 
               <div className="flex justify-center space-x-4">
-                <Button variant="outline" onClick={togglePause} disabled={!qaActiveSpeaker}>
+                <Button variant="outline" onClick={togglePause} disabled={!qaActiveRole}>
                   {isPaused ? <Play className="h-4 w-4 mr-2" /> : <Pause className="h-4 w-4 mr-2" />}
                   {isPaused ? "继续" : "暂停"}
                 </Button>
@@ -480,8 +514,7 @@ export function DebateTimer({ settings, onReset }: DebateTimerProps) {
               variant="outline"
               onClick={togglePause}
               disabled={
-                (currentPhase.speaker === "qa" && !qaActiveSpeaker) ||
-                (currentPhase.speaker === "both" && !activeSpeaker)
+                (currentPhase.speaker === "qa" && !qaActiveRole) || (currentPhase.speaker === "both" && !activeSpeaker)
               }
             >
               {isPaused ? <Play className="h-4 w-4 mr-2" /> : <Pause className="h-4 w-4 mr-2" />}
